@@ -1,0 +1,218 @@
+#!/usr/bin/perl
+
+use strict;
+use CGI;
+use RRDs;
+
+my $c = CGI->new;
+
+sub show_index {
+  print <<HTML;
+<html><body>
+<h1>Recieve</h1>
+<img src="cablegraph?graph=octets_sum">
+<br>
+<img src="cablegraph?graph=powerrx&group=low">
+<img src="cablegraph?graph=powerrx&group=high">
+<br>
+<img src="cablegraph?graph=snrrx&group=low">
+<img src="cablegraph?graph=snrrx&group=high">
+<br>
+<img src="cablegraph?graph=octets&group=low">
+<img src="cablegraph?graph=octets&group=high">
+<br>
+<img src="cablegraph?graph=corrected&group=low">
+<img src="cablegraph?graph=corrected&group=high">
+<br>
+<img src="cablegraph?graph=uncorrected&group=low">
+<img src="cablegraph?graph=uncorrected&group=high">
+<br>
+<img src="cablegraph?graph=freqrx&group=low">
+<img src="cablegraph?graph=freqrx&group=high">
+<br>
+<h1>Transmit</h1>
+<img src="cablegraph?graph=powertx"><br>
+<img src="cablegraph?graph=freqtx"><br>
+HTML
+}
+
+sub corrected_ds {
+  my($chan,$direction) = @_;
+
+  return (
+    "DEF:Correcteds$chan=/var/db/cable/$direction-$chan.rrd:Correcteds:AVERAGE",
+    "DEF:Octets$chan=/var/db/cable/$direction-$chan.rrd:Octets:AVERAGE",
+    "CDEF:p$chan=Correcteds$chan,Correcteds$chan,Octets$chan,+,/,100,*"
+  );
+}
+
+sub uncorrected_ds {
+  my($chan,$direction) = @_;
+
+  return (
+    "DEF:Uncorrectables$chan=/var/db/cable/$direction-$chan.rrd:Uncorrectables:AVERAGE",
+    "DEF:Correcteds$chan=/var/db/cable/$direction-$chan.rrd:Correcteds:AVERAGE",
+    "DEF:Octets$chan=/var/db/cable/$direction-$chan.rrd:Octets:AVERAGE",
+    "CDEF:p$chan=Uncorrectables$chan,Uncorrectables$chan,Correcteds$chan,Octets$chan,+,+,/,100,*"
+  );
+}
+
+sub octets_ds {
+  my($chan,$direction) = @_;
+
+  return (
+    "DEF:Octets$chan=/var/db/cable/$direction-$chan.rrd:Octets:AVERAGE",
+    "DEF:Correcteds$chan=/var/db/cable/$direction-$chan.rrd:Correcteds:AVERAGE",
+    "CDEF:p$chan=Octets$chan,Correcteds$chan,+,8,*"
+  );
+}
+
+sub octets_sum {
+  my($start,$channels) = @_;
+
+  my($cdef) = "CDEF:total=0";
+  for(my $chan = $start; $chan < $channels; $chan++) {
+    $cdef .= ",p$chan,+";
+  }
+
+  return (
+    $cdef,
+    "LINE2:total#ff8a00:Downloaded"
+  );
+}
+
+my(%graphs) = (
+  "powerrx" => {
+    ds => "Power",
+    unit => "dBmV",
+    title => "power received",
+    direction => "down",
+    scale => ["-l","-10","-u","10"],
+  },
+  "powertx" => {
+    ds => "Power",
+    unit => "dBmV",
+    title => "transmit power",
+    direction => "up",
+  },
+  "snrrx" => {
+    ds => "SNR",
+    unit => "dB",
+    title => "SNR received",
+    direction => "down",
+    scale => ["-l","30","-u","45"],
+  },
+  "octets" => {
+    ds => \&octets_ds,
+    unit => "bits/s",
+    title => "Per Channel Data Transferred",
+    direction => "down",
+  },
+  "corrected" => {
+    ds => \&corrected_ds,
+    unit => "%",
+    title => "% Octets Corrected",
+    direction => "down",
+    scale => ["-l","0","-u","1"],
+  },
+  "uncorrected" => {
+    ds => \&uncorrected_ds,
+    unit => "%",
+    title => "% Octets Uncorrectable",
+    direction => "down",
+    scale => ["-l","0","-u","1"],
+  },
+  "freqrx" => {
+    ds => "Freq",
+    unit => "MHz",
+    title => "Receive Frequency",
+    direction => "down",
+  },
+  "freqtx" => {
+    ds => "Freq",
+    unit => "MHz",
+    title => "Transmit Frequency",
+    direction => "up",
+  },
+  "octets_sum" => {
+    ds => \&octets_ds,
+    line => sub { return ();},
+    summaries => \&octets_sum,
+    unit => "bits/s",
+    title => "Total Data Transferred",
+    direction => "down",
+  }
+);
+my(%channels) = (
+  down => 16,
+  up => 4
+);
+
+my $graph = $graphs{$c->param("graph")};
+if(not defined $graph) {
+  print $c->header("text/html");
+  show_index();
+  exit(0);
+}
+print $c->header("image/png");
+my $channels = $channels{$graph->{direction}};
+
+my(@colors) = (
+	"ff0000", # Red
+	"00ff00", # Green
+	"0000ff", # Blue
+	"996633", # brownish
+	"ff00d3", # Magenta
+	"ffff00", # Yellow
+	"ff8a00", # Orange
+	"9fd300", # GreenYellow
+	"00ff9f", # Spring Green
+	"008aff", # SkyBlue
+	"9400d3", # Violet
+	"7bae33", # MediumForestGreen
+	"696969", # DimGray
+	"da6bd4", # Orchid
+	"3eacb5", # MediumTurquoise
+	"000000", # Black
+	"7221bc", # BlueViolet
+	"ac4da6", # MediumOrchid
+	"6a2566", # DarkOrchid
+	"670748", # Maroon
+	"4c2e57", # Plum
+	"7586be", # SlateBlue
+	"4f4f2f", # DarkOliveGreen
+	"2e9b1c", # LimeGreen
+	"d3d3d3", # LightGray
+	"00ffff", # Cyan
+	"aeaeae", # Gray
+	"c71585", # MediumVioletRed
+);
+
+my(@defs,@lines);
+my $start = 0;
+if($graph->{direction} eq "down" and $c->param("group") eq "high") {
+  $start = 8;
+} elsif($graph->{direction} eq "down" and $c->param("group") eq "low") {
+  $channels = 8;
+}
+for(my $chan = $start; $chan < $channels; $chan++) {
+  if(ref($graph->{ds})) {
+    push(@defs,$graph->{ds}->($chan,$graph->{direction}));
+  } else {
+    push(@defs,"DEF:p$chan=/var/db/cable/".$graph->{direction}."-$chan.rrd:".$graph->{ds}.":AVERAGE");
+  }
+  if(ref($graph->{line})) {
+    push(@lines,$graph->{line}->($chan,$colors[$chan]));
+  } else {
+    push(@lines,"LINE2:p$chan#".$colors[$chan].":Channel ".sprintf("%02d",$chan+1));
+  }
+}
+if(ref($graph->{summaries})) {
+  push(@lines,$graph->{summaries}->($start,$channels));
+}
+my(@args) = ("","-s","now-24h","-e","now","-t",$graph->{title},"-v",$graph->{unit});
+if($graph->{scale}) {
+  push(@args,@{$graph->{scale}});
+}
+my $graph = RRDs::graphv(@args,@defs,@lines);
+print $graph->{image};

@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+
+use strict;
+use HTML::TableExtract;
+use RRDs;
+use LWP::UserAgent;
+
+# returns an array of hashes
+sub extract_data {
+  my($columns,$html) = @_;
+
+  my $extracter = HTML::TableExtract->new(headers => $columns);
+  $extracter->parse($html);
+
+  my(@data);
+  foreach my $table ($extracter->tables) {
+    foreach my $row ($table->rows) {
+      my(%row_info);
+      for(my $i = 0; $i < @$columns and $i < @$row; $i++) {
+        $row_info{$columns->[$i]} = $row->[$i];
+      }
+      push(@data, \%row_info);
+    }
+  }
+
+  return \@data;
+}
+
+sub create_rrd {
+  my($file,$columns) = @_;
+
+  my(%ds) = (
+      "DCID" => ["DS:DCID:GAUGE:900:-10:1000"],
+      "UCID" => ["DS:UCID:GAUGE:900:-10:1000"],
+      "Freq" => ["DS:Freq:GAUGE:900:0:5000000000"],
+      "Power" => ["DS:Power:GAUGE:900:-100:100"],
+      "SNR" => ["DS:SNR:GAUGE:900:-100:100"],
+      "Octets" => ["DS:Octets:COUNTER:900:0:125000000"],
+      "Correcteds" => [
+                      "DS:Correcteds:COUNTER:900:0:125000000",
+#                      "DS:CorrectedPct:COMPUTE:Correcteds,Octets,Correcteds,+,+,/",
+                      ],
+      "Uncorrectables" => [
+                          "DS:Uncorrectables:COUNTER:900:0:125000000",
+#                          "DS:UncorrectedPct:COMPUTE:Uncorrectables,Uncorrectables,Octets,Correcteds,+,+,+,/",
+                          ]
+      );
+
+  if(not -f $file) {
+    my(@args) = ($file,"-s","300");
+    foreach my $column (@$columns) {
+      if(ref($ds{$column})) {
+        push(@args,@{$ds{$column}});
+      }
+    }
+    push(@args,
+        "RRA:AVERAGE:0.5:1:3000",
+        "RRA:MIN:0.5:12:2400",
+        "RRA:MAX:0.5:12:2400", 
+        "RRA:AVERAGE:0.5:12:2400");
+    RRDs::create(@args);
+  }
+}
+
+sub update_rrd {
+  my($file,$columns,$data) = @_;
+
+  create_rrd($file,$columns);
+
+  my(@template) = ();
+  my(@row) = ("N"); # "now"
+  foreach my $column (@$columns) {
+    push(@template,$column);
+    if($column eq "Freq") {
+      my $freq = $data->{$column};
+      $freq =~ s/([0-9.]+) MHz/\1/;
+      push(@row,$freq);
+    } elsif($column eq "Power") {
+      my $power = $data->{$column};
+      $power =~ s/ dBmV//;
+      push(@row,$power);
+    } elsif($column eq "SNR") {
+      my $snr = $data->{$column};
+      $snr =~ s/ dB//;
+      push(@row,$snr);
+    } elsif($column eq "Octets" or $column eq "Correcteds" or $column eq "Uncorrectables" or $column eq "UCID" or $column eq "DCID") {
+      push(@row,$data->{$column});
+    } else {
+      die("unknown column $column");
+    }
+  }
+  my(@ret) = RRDs::updatev($file,"-t",join(":",@template),join(":",@row));
+#  use Data::Dumper;
+#  print Dumper(\@ret);
+}
+
+chdir("/var/db/cable");
+
+my $lwp = LWP::UserAgent->new;
+$lwp->timeout(10);
+my $response = $lwp->get("http://192.168.100.1/cgi-bin/status_cgi");
+ 
+if ($response->is_success) {
+  my $html = $response->decoded_content;
+
+  my(@down_columns) = ("",qw(DCID Freq Power SNR Modulation Octets Correcteds Uncorrectables));
+  my $down_info = extract_data(\@down_columns,$html);
+
+  my(@up_columns) = ("","UCID","Freq","Power","Channel Type","Symbol Rate", "Modulation");
+  my $up_info = extract_data(\@up_columns,$html);
+
+  for(my $i = 0; $i < @$down_info; $i++) {
+    my(@rrd_down_columns) = qw(DCID Freq Power SNR Octets Correcteds Uncorrectables);
+    update_rrd("down-$i.rrd",\@rrd_down_columns,$down_info->[$i]);
+  }
+
+  for(my $i = 0; $i < @$up_info; $i++) {
+    my(@rrd_up_columns) = qw(UCID Freq Power);
+    update_rrd("up-$i.rrd",\@rrd_up_columns,$up_info->[$i]);
+  }
+} else {
+  die $response->status_line;
+}
