@@ -12,28 +12,51 @@ sub show_index {
 <h1>Recieve</h1>
 <img src="cablegraph?graph=octets_sum">
 <br>
-<img src="cablegraph?graph=powerrx&group=low">
-<img src="cablegraph?graph=powerrx&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=powerrx&group=low"></a>
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=powerrx&group=high"></a>
 <br>
-<img src="cablegraph?graph=snrrx&group=low">
-<img src="cablegraph?graph=snrrx&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=snrrx&group=low"></a>
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=snrrx&group=high"></a>
 <br>
-<img src="cablegraph?graph=octets&group=low">
-<img src="cablegraph?graph=octets&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=octets&group=low">
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=octets&group=high"></a>
 <br>
-<img src="cablegraph?graph=corrected&group=low">
-<img src="cablegraph?graph=corrected&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=corrected&group=low"></a>
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=corrected&group=high"></a>
 <br>
-<img src="cablegraph?graph=uncorrected&group=low">
-<img src="cablegraph?graph=uncorrected&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=uncorrected&group=low"></a>
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=uncorrected&group=high"></a>
 <br>
-<img src="cablegraph?graph=freqrx&group=low">
-<img src="cablegraph?graph=freqrx&group=high">
+<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=freqrx&group=low"></a>
+<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=freqrx&group=high"></a>
 <br>
 <h1>Transmit</h1>
 <img src="cablegraph?graph=powertx"><br>
 <img src="cablegraph?graph=freqtx"><br>
 HTML
+}
+
+sub show_group {
+  my($group,$low,$high) = @_;
+
+  print <<HTML;
+<html><body>
+<h1>Recieve - $group</h1>
+<img src="cablegraph?graph=octets_sum">
+<br>
+HTML
+
+  for(my $i = $low; $i < $high; $i++) {
+    print "Channel ".($i + 1)."<br>\n";
+    print <<HTML;
+<img src="cablegraph?graph=powerrx&channel=$i">
+<img src="cablegraph?graph=snrrx&channel=$i"><br>
+<img src="cablegraph?graph=octets&channel=$i">
+<img src="cablegraph?graph=corrected&channel=$i"><br>
+<img src="cablegraph?graph=uncorrected&channel=$i">
+<img src="cablegraph?graph=freqrx&channel=$i"><br>
+HTML
+  }
 }
 
 sub corrected_ds {
@@ -151,7 +174,15 @@ my(%channels) = (
 my $graph = $graphs{$c->param("graph")};
 if(not defined $graph) {
   print $c->header("text/html");
-  show_index();
+
+  my $showgroup = $c->param("showgroup");
+  if($showgroup eq "low") {
+    show_group($showgroup, 0, 8);
+  } elsif($showgroup eq "high") {
+    show_group($showgroup, 8, 16);
+  } else {
+    show_index();
+  }
   exit(0);
 }
 print $c->header("image/png");
@@ -194,7 +225,11 @@ if($graph->{direction} eq "down" and $c->param("group") eq "high") {
   $start = 8;
 } elsif($graph->{direction} eq "down" and $c->param("group") eq "low") {
   $channels = 8;
+} elsif($c->param("channel") =~ /^[0-9]+$/ and $c->param("channel") < $channels) {
+  $start = $c->param("channel");
+  $channels = $c->param("channel") + 1;
 }
+
 for(my $chan = $start; $chan < $channels; $chan++) {
   if(ref($graph->{ds})) {
     push(@defs,$graph->{ds}->($chan,$graph->{direction}));
