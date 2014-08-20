@@ -4,7 +4,83 @@ use strict;
 use CGI;
 use RRDs;
 
+my(%graphs) = (
+  "powerrx" => {
+    ds => "Power",
+    unit => "dBmV",
+    title => "power received",
+    direction => "down",
+    scale => ["-l","-10","-u","10"],
+    order => 1
+  },
+  "powertx" => {
+    ds => "Power",
+    unit => "dBmV",
+    title => "transmit power",
+    direction => "up",
+  },
+  "snrrx" => {
+    ds => "SNR",
+    unit => "dB",
+    title => "SNR received",
+    direction => "down",
+    scale => ["-l","30","-u","45"],
+    order => 2
+  },
+  "octets" => {
+    ds => \&octets_ds,
+    unit => "bits/s",
+    title => "Per Channel Data Transferred",
+    direction => "down",
+    order => 3
+  },
+  "corrected" => {
+    ds => \&corrected_ds,
+    unit => "%",
+    title => "% Octets Corrected",
+    direction => "down",
+    scale => ["-l","0","-u","1"],
+    order => 4
+  },
+  "uncorrected" => {
+    ds => \&uncorrected_ds,
+    unit => "%",
+    title => "% Octets Uncorrectable",
+    direction => "down",
+    scale => ["-l","0","-u","1"],
+    order => 5
+  },
+  "freqrx" => {
+    ds => "Freq",
+    unit => "MHz",
+    title => "Receive Frequency",
+    direction => "down",
+    order => 6
+  },
+  "freqtx" => {
+    ds => "Freq",
+    unit => "MHz",
+    title => "Transmit Frequency",
+    direction => "up",
+  },
+  "octets_sum" => {
+    ds => \&octets_ds,
+    line => sub { return ();},
+    summaries => \&octets_sum,
+    unit => "bits/s",
+    title => "Total Data Transferred",
+    direction => "down",
+  }
+);
+my(%channels) = (
+  down => 16,
+  up => 4
+);
+
 my $c = CGI->new;
+
+my @rx_types = grep { $graphs{$_}{"direction"} eq "down" and $_ ne "octets_sum" } keys %graphs;
+@rx_types = sort { $graphs{$a}{order} <=> $graphs{$b}{order} } @rx_types;
 
 sub show_index {
   print <<HTML;
@@ -12,24 +88,16 @@ sub show_index {
 <h1>Recieve</h1>
 <img src="cablegraph?graph=octets_sum">
 <br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=powerrx&group=low"></a>
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=powerrx&group=high"></a>
-<br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=snrrx&group=low"></a>
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=snrrx&group=high"></a>
-<br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=octets&group=low">
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=octets&group=high"></a>
-<br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=corrected&group=low"></a>
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=corrected&group=high"></a>
-<br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=uncorrected&group=low"></a>
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=uncorrected&group=high"></a>
-<br>
-<a href="cablegraph?showgroup=low"><img src="cablegraph?graph=freqrx&group=low"></a>
-<a href="cablegraph?showgroup=high"><img src="cablegraph?graph=freqrx&group=high"></a>
-<br>
+HTML
+
+  foreach my $type (@rx_types) {
+    foreach my $group (qw(low high)) {
+      print qq(<a href="cablegraph?showgroup=$group&type=$type"><img src="cablegraph?graph=$type&group=$group"></a>\n);
+    }
+    print "<br>\n";
+  }
+  
+  print <<HTML;
 <h1>Transmit</h1>
 <img src="cablegraph?graph=powertx"><br>
 <img src="cablegraph?graph=freqtx"><br>
@@ -37,25 +105,34 @@ HTML
 }
 
 sub show_group {
-  my($group,$low,$high) = @_;
+  my($group,$type,$low,$high) = @_;
 
   print <<HTML;
 <html><body>
-<h1>Recieve - $group</h1>
+<h1>Recieve - $group/$type</h1>
 <img src="cablegraph?graph=octets_sum">
 <br>
 HTML
 
   for(my $i = $low; $i < $high; $i++) {
     print "Channel ".($i + 1)."<br>\n";
-    print <<HTML;
-<img src="cablegraph?graph=powerrx&channel=$i">
-<img src="cablegraph?graph=snrrx&channel=$i"><br>
-<img src="cablegraph?graph=octets&channel=$i">
-<img src="cablegraph?graph=corrected&channel=$i"><br>
-<img src="cablegraph?graph=uncorrected&channel=$i">
-<img src="cablegraph?graph=freqrx&channel=$i"><br>
+    print qq(<a href="cablegraph?showchannel=$i"><img src="cablegraph?graph=$type&channel=$i"></a><br>\n);
+  }
+}
+
+sub show_channel {
+  my($channel) = @_;
+
+  my $channel_display = $channel + 1;
+  print <<HTML;
+<html><body>
+<h1>Recieve - Channel $channel_display</h1>
+<img src="cablegraph?graph=octets_sum">
+<br>
 HTML
+
+  foreach my $type (@rx_types) {
+    print qq(<img src="cablegraph?graph=$type&channel=$channel"><br>\n);
   }
 }
 
@@ -104,82 +181,22 @@ sub octets_sum {
   );
 }
 
-my(%graphs) = (
-  "powerrx" => {
-    ds => "Power",
-    unit => "dBmV",
-    title => "power received",
-    direction => "down",
-    scale => ["-l","-10","-u","10"],
-  },
-  "powertx" => {
-    ds => "Power",
-    unit => "dBmV",
-    title => "transmit power",
-    direction => "up",
-  },
-  "snrrx" => {
-    ds => "SNR",
-    unit => "dB",
-    title => "SNR received",
-    direction => "down",
-    scale => ["-l","30","-u","45"],
-  },
-  "octets" => {
-    ds => \&octets_ds,
-    unit => "bits/s",
-    title => "Per Channel Data Transferred",
-    direction => "down",
-  },
-  "corrected" => {
-    ds => \&corrected_ds,
-    unit => "%",
-    title => "% Octets Corrected",
-    direction => "down",
-    scale => ["-l","0","-u","1"],
-  },
-  "uncorrected" => {
-    ds => \&uncorrected_ds,
-    unit => "%",
-    title => "% Octets Uncorrectable",
-    direction => "down",
-    scale => ["-l","0","-u","1"],
-  },
-  "freqrx" => {
-    ds => "Freq",
-    unit => "MHz",
-    title => "Receive Frequency",
-    direction => "down",
-  },
-  "freqtx" => {
-    ds => "Freq",
-    unit => "MHz",
-    title => "Transmit Frequency",
-    direction => "up",
-  },
-  "octets_sum" => {
-    ds => \&octets_ds,
-    line => sub { return ();},
-    summaries => \&octets_sum,
-    unit => "bits/s",
-    title => "Total Data Transferred",
-    direction => "down",
-  }
-);
-my(%channels) = (
-  down => 16,
-  up => 4
-);
-
 my $graph = $graphs{$c->param("graph")};
 if(not defined $graph) {
   print $c->header("text/html");
 
+  my $type = $c->param("type");
+  if(not defined $graphs{$type}) {
+    $type = "powerrx";
+  }
   my $showgroup = $c->param("showgroup");
+  my $showchannel = $c->param("showchannel");
   if($showgroup eq "low") {
-    show_group($showgroup, 0, 8);
+    show_group($showgroup, $type, 0, 8);
   } elsif($showgroup eq "high") {
-    show_group($showgroup, 8, 16);
+    show_group($showgroup, $type, 8, 16);
+  } elsif($showchannel =~ /^[0-9]+$/) {
+    show_channel($showchannel);
   } else {
     show_index();
   }
