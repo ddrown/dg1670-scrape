@@ -262,7 +262,7 @@ for(my $chan = $start; $chan < $channels; $chan++) {
 if(ref($graph->{summaries})) {
   push(@lines,$graph->{summaries}->($start,$channels));
 }
-my(@args) = ("","-s","now-24h","-e","now","-t",$graph->{title},"-v",$graph->{unit});
+my(@args) = ("-","-s","now-24h","-e","now","-t",$graph->{title},"-v",$graph->{unit});
 if($graph->{scale}) {
   push(@args,@{$graph->{scale}});
 }
